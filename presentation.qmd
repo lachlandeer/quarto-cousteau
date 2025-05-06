@@ -1,7 +1,7 @@
 ---
-title: "Presentation"
+title: "Difference in Differences"
 author: "Lachlan Deer"
-institute: "Somewhere"
+institute: "Social Media and Web Analytics, Spring 2025"
 format: 
   beamer: 
     aspectratio: 32
@@ -9,34 +9,720 @@ format:
     theme: cousteau
 ---
 
-# In the morning
+```{r}
+library(readr)
+library(dplyr)
+library(infer)
+library(ggplot2)
+library(tidyr)
+library(broom)
+library(estimatr)
+library(modelsummary)
+library(dagitty)
+library(ggdag)
+```
 
-## Getting up
+# Learning Goals
 
-- Turn off alarm
-- Get out of bed
+1. Define and give examples of natural / quasi experiments
+2. Explain three empirical strategies (cross-section, before-and-after and difference in differences) to estimate the causal effect of a treatment 
+3. Explain and defend the assumptions that underpin each of the three empirical designs
+4. Analyze data using the three designs using R
 
-## Breakfast
+# Where we've been
 
-- Eat eggs
-- Drink coffee
+In previous sessions, we have:
 
-# In the evening
+* Seen how **\alert{randomized control trials}** and **\alert{A/B tests}** can retrieve **causal effects**
+* Used **\alert{linear regression}** to estimate the **causal effects** of interest
+* Discussed how we can use **\alert{pre-experiment data}** to **minimize variance** in a A/B test design
+* Addressed two importance issues for **inference**: **\alert{heteroskedasticity robust- and clustered standard errors}**
 
-## Dinner
+Now we're going to leave the experimental ideal, to see if we can still recover causal effects of **binary** treatments
 
-- Eat spaghetti
-- Drink wine
+# Leaving the Experimental Ideal
 
-## Going to sleep
+There are **\alert{many situations}** where we either:
 
-- Get in bed
-- Count sheep
+* **\alert{Cannot completely randomize}** treatment between individuals/firms we want to study
+* Or (worse), we **\alert{cannot directly manipulate treatment}** assignment
 
-# Before I Sleep
+**\alert{Question}**: How can we deal with selection bias and/or omitted variable bias if we do not randomize?
 
-## I write equations
+# Natural/Quasi Experiments 
+
+**Our goal**: Define a setting and hypotheses that get us **\alert{as close as possible}** to a **randomized experiment**
+
+* These methods are sometimes referred to as **\alertb{"natural experiments"}** or **\alertb{"quasi-experiments"}**
+
+What is a **\alert{Natural Experiment}**?
+
+* Units (individuals, firms etc) are **exposed** to treatment and control conditions in a way that is **outside** of the **control** of researchers/analysts
+
+* BUT the process that governs assignment **resembles a random assignment**
+
+* The analyst must convincingly argue that the setting  under consideration resembles an experiment
+
+# Natural/Quasi Experiments: Examples
+
+Good natural experiments are studies in which there is a **transparent exogenous source of variation** in the explanatory variables that **determine treatment assignment**
+
+\begin{figure}
+\includegraphics[width=8cm]{figs/ex1.png}
+\end{figure}  
+
+# Natural/Quasi Experiments: Examples
+
+Good natural experiments are studies in which there is a **transparent exogenous source of variation** in the explanatory variables that **determine treatment assignment**
+
+\begin{figure}
+\includegraphics[width=8cm]{figs/ex2.png}
+\end{figure} 
+
+# Natural/Quasi Experiments: Examples
+
+Good natural experiments are studies in which there is a **transparent exogenous source of variation** in the explanatory variables that **determine treatment assignment**
+
+\begin{figure}
+\includegraphics[width=8cm]{figs/ex3.png}
+\end{figure} 
+
+# Research Design for Natural Experiments
+
+We will focus in on **\alert{Difference in Differences}** (DiD, or Diff-in-Diff) as a **research design** to analyze data from a natural experiment
+
+* One of the **most popular** methods used in empirical work to estimate the effect of a marketing intervention
+
+* The idea will be **very simple** (and easy to communicate), and there are many settings where it **"fits well"** to the context we want to study
+
+* This method "works" due to a **non-refutable assumption**: **\alertb{parallel trends}**
+    * A lot of work thus must go in to showing this assumption is reasonable in the application under study
+
+# Confounding in Observational Data
+
+:::: {.columns}
+
+::: {.column width="60%"}
+
+**Confounder**: pre-treatment variable (Z) affecting the treatment (T) and outcome (Y)
+
+\vspace{0.25cm}
+
+Lead to **\alert{confounding bias}** in the estimated SATE due to these differences
+
+* $\bar{Y}_{control}$ is **not** a good proxy for $\frac{1}{n}\sum_{i=1}^{n} Y_i(0)$
+* Types of bias:
+    * (self-) **Selection bias** into treatment 
+    * **Omitted Variable** correlated to treatment and outcome
+
+:::
+
+::: {.column width="40%"}
+
+```{r, echo = FALSE, cache = TRUE, out.width="100%", fig.align='center'}
+
+dag <- 
+    dagify(y ~ T, 
+  y~~z,
+  T ~ z,
+  exposure = "T",
+  outcome = "y"
+)
+
+ggdag(dag, 
+      layout = "circle",
+      node_size = 20,
+      text_size = 10) +
+    geom_dag_edges(edge_width = 2 , 
+                   #alpha = 0.4,
+                   arrow_directed = grid::arrow(length = grid::unit(14, "pt"), type = "closed"),
+                   arrow_bidirected = grid::arrow(length = grid::unit(14, "pt"), 
+                                                  ends = "both", type ="closed"
+                                                  ),
+    
+                   ) + 
+    theme_dag_blank()
+
+
+```
+
+:::
+
+::::
+
+# The Fundamental Problem of Causal Inference
+
+Recall the **fundamental problem of causal inference**
+
+\vspace{0.4cm}
+
+\begin{center}
+\textbf{\alert{Analyst must infer counterfactual outcomes}}
+\end{center}
+
+\vspace{0.4cm}
+
+Can we find **other ways** to **estimate** the **counterfactual outcome** of a treated individual using other observations **?**
+
+# A (Fictitious) Example
+
+**Business questions**: Do search engine ads increase spending?
+
+**Test setting**: Google Sponsored Ads, Large Retailer
+
+**Unit**: consumers
+
+**Treatments**: control group - no ads, treatment group - sees ads
+
+**Response**: spending in the next 30 days
+
+**Selection**: all consumers who purchased in last 180 days
+
+**Assignment**: Search engine ads were banned in one province by government on the first day of November of a calendar year, left on in adjacent province
+
+**Sample size**: 1,000 consumers split 50/50 over provinces
+
+# Load and inspect data
+
+```{r, echo = TRUE, message = FALSE}
+df <- read_csv("data/diff_in_diff.csv")
+head(df)
+```
+
+# Three Questions
+
+1. Do you expect the treatment and control group' spending to be the same on average **before** the ad ban? Why?
+
+2. Do you expect the ad ban to be the **only** cause of changes in average spending for the treatment group between October (pre-ban) and November (post-ban)? Why?
+
+3. Do you think that in the **absence** of the ad ban, the **change in average spending** in the treatment group would have been the **same** as in the control group? Why?
+
+# Research Designs
+
+How do we **\alert{find a good comparison group}**?
+
+* Depends on the data available
+
+Three types observational study research designs:
+
+1. **Cross-sectional design**: Compare outcomes of treated and control units at one point in time
+2. **Before-and-after design**: Compare outcomes before and after a unit has been treated, but we need data over time for the treated group
+3. **Difference-in-difference design**: Compare changes in the treatment group over time to changes in the control group over time. Needs data over time for the treated and control group
+
+# Research Designs
+
+\begin{figure}
+\includegraphics[width=12cm]{figs/3_choices.png}
+\end{figure}
+
+# Cross Sectional Design
+
+:::: {.columns}
+
+::: {.column width="30%"}
+
+\begin{figure}
+\includegraphics[width=4cm]{figs/cross_section.png}
+\end{figure}
+
+:::
+
+::: {.column width="70%"}
+
+* Compare treated and control groups after the treatment happens
+
+* **Assumption**: groups are identical on average
+    * Sometimes this is called **unconfoundedness** or **as-if randomized**
+
+* Cross-section estimate:
 
 $$
-y = x \beta + \varepsilon
+\bar{Y}_{\text{treated}}^{\text{after}} - \bar{Y}_{\text{control}}^{\text{after}}
 $$
+
+* Could there be confounders?
+
+:::
+
+::::
+
+# Cross Sectional Design in R: Manually
+\footnotesize
+
+```{r, echo = TRUE, message = TRUE}
+# after period
+cross_section <-
+    df %>%
+    filter(after == 1)
+
+cross_section_est <- cross_section %>%
+    # group means
+    group_by(treatment_group) %>%
+    summarize(
+        mean_sales = mean(sales)
+    ) %>%
+    # difference between groups
+    ungroup() %>%
+    mutate(estimate = mean_sales - lag(mean_sales)) %>%
+    na.omit() %>%
+    purrr::pluck("estimate")
+
+message("Cross Section Estimate: ", cross_section_est)
+```
+
+# Cross Sectional Design in R: Linear Regression
+
+```{r, echo = TRUE}
+tidy(lm(sales ~ treatment_group, 
+        data = cross_section))
+```
+
+# Before-After Comparison
+
+:::: {.columns}
+
+::: {.column width="30%"}
+
+\begin{figure}
+\includegraphics[width=4cm]{figs/before_after.png}
+\end{figure}
+
+:::
+
+::: {.column width="70%"}
+* Compares individuals before and after the treatment
+
+* Advantage: all person specific features held fixed
+    * "comparing within person over time"
+    
+* Before vs after estimate:
+
+$$
+\bar{Y}_{\text{treated}}^{\text{after}} - \bar{Y}_{\text{treatment}}^{\text{before}}
+$$
+
+* **Assumption**: No **\alert{time varying}** confounders
+    * i.e. no evolution of outcome over time that is not due to the treatment
+
+:::
+
+::::
+
+# Before and After in R: Manually
+\footnotesize
+```{r, echo = TRUE, message = TRUE}
+# treatment group, period immediately before and after
+before_after <-
+    df %>%
+    filter(time_period %in% c(10,11),
+           treatment_group == "treatment")
+
+before_after_est <- before_after %>%
+    group_by(after) %>%
+    dplyr::summarize(
+        mean_sales = mean(sales)
+    ) %>%
+    ungroup() %>%
+    mutate(estimate = mean_sales - lag(mean_sales)) %>%
+    na.omit() %>%
+    purrr::pluck("estimate")
+
+message("Before After Estimate: ", before_after_est)
+```
+
+# Before and After in R: Linear Regression
+
+```{r, echo = FALSE}
+tidy(lm(sales ~ after, 
+        data = before_after))
+```
+
+# Two differences can be better than one
+
+:::: {.columns}
+
+::: {.column width="30%"}
+
+\begin{figure}
+\includegraphics[width=4cm]{figs/diff_in_diff.png}
+\end{figure}
+
+:::
+
+::: {.column width="70%"}
+
+* Use the before/after difference of **control group** to infer what would have happened to **treatment group** without treatment.
+
+* DiD Estimate:
+
+$$
+\underbrace{(\bar{Y}_{\text{treated}}^{\text{after}} - \bar{Y}_{\text{treatment}}^{\text{before}})}_{\text{Change in the treatment group}} -
+\underbrace{(\bar{Y}_{\text{control}}^{\text{after}} - \bar{Y}_{\text{control}}^{\text{before}})}_{\text{Change in the control group}}
+$$
+
+i.e. the change in the treatment group above and beyond the change in the control group
+
+* **Assumption**: **\alert{parallel trends}**
+    * Changes in the outcome for the treated group would have been the same as in the control group in the absence of treatment
+    * Threat to inference: **non-parallel trends**
+
+
+:::
+
+::::
+
+# Difference in Differences in R
+\footnotesize
+
+```{r, echo = TRUE, message=FALSE}
+# did data -- treat and control, before and after
+did_data <- 
+    df %>% 
+    filter(time_period %in% c(10,11))
+
+did_est <- did_data %>%
+    group_by(treatment_group, after) %>%
+    summarise(mean_sales = mean(sales)) %>%
+    ungroup() %>%
+    pivot_wider(names_from = after, 
+                values_from = mean_sales) %>%
+    mutate(across_rows_diff = `1` - `0`) %>%
+    mutate(estimate = across_rows_diff - lag(across_rows_diff)) %>%
+    na.omit() %>%
+    purrr::pluck("estimate")
+
+print(paste0("Diff in Diff Estimate: ", did_est))
+```
+
+# Estimating the Treatment Effect with Diff in Diff
+
+\begin{center}
+\alert{\textbf{Why does Diff in Diff allow us to \\
+estimate the effect of the marketing intervention?}}
+\end{center}
+
+\vspace{0.4cm}
+
+Let's maintain the **two groups** and **two time periods** set up
+
+* **Groups**: Treatment and Control
+* **Time Periods**: Before and after
+
+Let's put the mean outcomes for each combination in a table
+
+# The 2 x 2 Table
+
+\begin{table}
+\begin{tabular}{c|cc}
+\hline 
+          & Before                          & After                         \\
+          \hline
+Control   & $ \bar{Y}_{\text{control}}^{\text{before}}$   & $ \bar{Y}_{\text{control}}^{\text{after}}$  \\
+Treatment & $ \bar{Y}_{\text{treatment}}^{\text{before}}$ & $\bar{Y}_{\text{treatment}}^{\text{after}}$ \\
+\hline
+\end{tabular}
+\end{table}
+
+# The 2 x 2 Table
+
+Let's update the notation:
+
+1. Control group, before intervention starts
+$$\bar{Y}_{\text{before}}^{\text{control}} = \beta_0$$
+2. Control group, after intervention starts
+$$\bar{Y}_{\text{after}}^{\text{control}} = \beta_0 + \beta_1$$
+3. Treatment group, before intervention starts
+$$\bar{Y}_{\text{before}}^{\text{treatment}} = \beta_0 + \beta_2$$
+4. Treatment group, after intervention starts 
+$$\bar{Y}_{\text{after}}^{\text{treatment}} = \beta_0 + \beta_2 + \beta_1 + \delta$$
+
+# The 2 x 2 Table
+
+\begin{table}
+\begin{tabular}{c|cc}
+\hline 
+          & Before                          & After                         \\
+          \hline
+Control   & $\beta_0$   & $\beta_0 + \beta_1$  \\
+Treatment & $\beta_0 + \beta_2$ & $\beta_0 + \beta_2 + \beta_1 + \delta$ \\
+\hline
+\end{tabular}
+\end{table}
+
+# The 2 x 2 Table
+
+Let's take differences in the following order:
+
+* Across columns, then
+* Across rows
+
+\vspace{0.3cm}
+
+\begin{table}[]
+\begin{tabular}{c|ccc}
+\hline
+                    & Before              & After                                  & After - Before     \\
+\hline
+Control             & $ \beta_0$          & $\beta_0 + \beta_1$                    & $\beta_1$          \\
+Treatment           & $\beta_0 + \beta_2$ & $\beta_0 + \beta_2 + \beta_1 + \delta$ & $\beta_1 + \delta$ \\
+Treatment - Control &                     &                                        & $\delta$       \\
+\hline
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+
+**'Double Differencing'** $\implies$ estimate $\delta$
+
+* I call this DiD estimate using averages **\alert{simple DiD}**
+
+# The 2 x 2 Table
+
+Let's take differences in the following order:
+
+* Across columns, then
+* Across rows
+
+\vspace{0.3cm}
+
+\begin{table}[]
+\begin{tabular}{c|ccc}
+\hline
+                    & Before              & After                                  & After - Before \\
+\hline
+Control             & $ \beta_0$          & $\beta_0 + \beta_1$                    &                \\
+Treatment           & $\beta_0 + \beta_2$ & $\beta_0 + \beta_2 + \beta_1 + \delta$ &                \\
+Treatment - Control & $\beta_2$           & $\beta_2 + \delta$                     & $\delta$   \\
+\hline
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+
+**'Double Differencing'** $\implies$ estimate $\delta$
+
+* I call this DiD estimate using averages **\alert{simple DiD}**
+
+# Difference in Difference Graphically
+
+```{r, echo = FALSE, out.width = '85%', fig.align = 'center'}
+# initialize plot and add control group
+plot(c(0, 1), c(6, 8), 
+     type = "p",
+     ylim = c(5, 12),
+     xlim = c(-0.3, 1.3),
+     main = "The Differences-in-Differences Estimator",
+     xlab = "Period",
+     ylab = "Y",
+     col = "steelblue",
+     pch = 20,
+     xaxt = "n",
+     yaxt = "n")
+
+axis(1, at = c(0, 1), labels = c("before", "after"))
+axis(2, at = c(0, 13))
+
+# add treatment group
+points(c(0, 1, 1), c(7, 9, 11), 
+       col = "darkred",
+       pch = 20)
+
+# add line segments
+lines(c(0, 1), c(7, 11), col = "darkred")
+lines(c(0, 1), c(6, 8), col = "steelblue")
+lines(c(0, 1), c(7, 9), col = "darkred", lty = 2)
+lines(c(1, 1), c(9, 11), col = "black", lty = 2, lwd = 2)
+
+# add annotations
+text(1, 10, expression(hat(delta)), cex = 1.3, pos = 4)
+text(0, 5.5, "mean control", cex = 1.1 , pos = 4)
+text(0, 6.8, "mean treatment", cex = 1.1 , pos = 4)
+text(1, 7.9, "mean control", cex = 1.1 , pos = 4)
+text(1, 11.1, "mean treatment", cex = 1.1 , pos = 4)
+```
+
+# DiD as a Regression
+
+$$y_{it} = \beta_0 + \beta_1 After_t + \beta_2Treated_i + \delta After_t \times Treated_i + \varepsilon_{it}$$
+
+where:
+
+* $After_t$ = 1 in the period after treatment occurs, zero otherwise
+* $Treated_i$ = 1 if the individual is ever treated, zero otherwise
+
+# DiD Regression in R
+\footnotesize
+
+```{r, echo = TRUE}
+tidy(lm(sales ~ treatment_group + after + treatment_group:after, 
+        data = did_data
+        ))
+```
+
+# Standard Error Adjustment
+
+* Homoskedasticity in the standard errors is likely violated
+* **\alert{Cluster Robust Standard Errors}** are the **default choice** for DiD designs
+* What unit to cluster?
+    * The variable that determines treatment assignment
+
+# Parallel Trends
+
+**We must assume that Time effects treatment and control groups equally**
+
+* Otherwise controlling for time (i.e. `after`) won't work
+
+This is called the **parallel trends** assumption
+
+* Again, *if the Treatment hadn't happened to anyone*, the differences between the treatment and control would stay the same
+
+# Checking for Parallel Trends
+
+Like many assumptions - its **untestable**
+
+* Though we can **'check' whether patterns in the data are suggestive its OK** 
+* Here's the most popular way: 
+  * Are *prior trends* are the same for Treated and Control groups
+  * Generally, compute average of outcome by group over time
+  * (needs **multiple** pre-treatment periods) 
+  * Was the gap changing a lot during that period? If not, suggestive we're OK
+
+# Visualizing Parallel Trends
+
+```{r, out.width="80%", fig.align='center'}
+df %>%
+    filter(after == 0) %>%
+    group_by(treatment_group, time_period) %>%
+    dplyr::summarise(mean_sales = mean(sales)) %>%
+    ggplot() +
+    geom_line(aes(x = time_period, y = mean_sales, color = treatment_group)) +
+    theme_bw()
+```
+
+# Isn't this just CUPED in disguise
+
+\begin{center}
+\textbf{How is this different from CUPED?}
+\end{center}
+
+\vspace{0.35cm}
+
+```{r, echo = FALSE, message = TRUE}
+cuped_df <- 
+    did_data %>%
+    tidyr::pivot_wider(id_cols = customer_id,
+                       names_from = after,
+                       names_prefix = "time_",
+                       values_from = c(sales, treatment_group)
+    )
+
+theta <- 
+    tidy(lm(sales_time_1 ~ sales_time_0, data = cuped_df)) %>%
+    filter(term=="sales_time_0") %>%
+    select(estimate) %>%
+    purrr::pluck('estimate')
+
+#print(theta)
+
+cuped_df <- 
+    cuped_df %>%
+    mutate(cuped_spend = sales_time_1 - 
+               theta*(sales_time_0 - mean(cuped_df$sales_time_0)
+               )
+    )
+
+mod_cuped <- tidy(lm(cuped_spend ~ treatment_group_time_0, 
+                data = cuped_df))
+
+#print(mod_cuped)
+
+cuped_est <-
+    mod_cuped %>%
+    filter(term == "treatment_group_time_0treatment") %>%
+    purrr::pluck("estimate")
+
+message("CUPED estimate: ", round(cuped_est,4))
+```
+
+CUPED is equivalent to Difference in Differences under the following conditions:
+
+* $\theta = 1$, 
+    * But in our example, $\hat{\theta}$ is `r `round(theta,4)`
+
+* No differences in mean outcomes at the level of treatment assignment
+    * In our example, the difference in average spending pre-treatment is 0.4, and statistically significant
+
+# Adding Control Variables
+
+In applications, analysts may want to account for covariates in their DiD specification by **including covariates** in their regression.
+
+$$y_{it} = \beta_0 + \beta_1 After_t + \beta_2Treated_i + \delta After_t \times Treated_i + X_i \theta + \varepsilon_{it}$$
+
+This is **additional structure** imposed by the researcher
+
+Identifies the average treatment effect when the treatment effect is:
+
+* Constant, and
+* Additive
+
+This is a **stronger assumption** than the control variable free approach
+
+# "As good as random"
+
+Two assumptions for causality:
+
+1. **Valid counterfactual outcomes**
+  * Control Group + parallel trends solves this one for us
+2. **Conditional independence**: nothing unobserved is causing selection into treatment group 
+  * Trickier ... 
+  * Randomised Control Trial or A/B Test like $\rightarrow$ You're more than likely gonna be OK
+  * Natural / Quasi Experiment $\rightarrow$ have you got a credible proxy for random assignment?
+    * Profession's thoughts: Large, visible, unexpected shocks
+    
+# A Warning!
+
+- DiD's popularity is relatively recent, so we're still learning a lot about it!
+  - Most relevant has to do with **staggered roll out DiD**
+- The regression version of DiD doesn't *necessarily* need to have treatment applied at *one* particular time
+  - Treatment could be gradually implemented over time
+- Nothing we've explicitly said would prevent us from using the regression DiD right!?
+  - Well... that's what we thought for a long time. 
+  - And you'll see many of published studies doing this. 
+  - BUT it turns out to actually **bias results by quite a lot**
+- There are more complex, newer estimators for staggered roll out case, 
+  - Too much for this class
+  
+# Recap
+
+* When we cannot run a randomized experiment, we want to use observational data that mimics random assignment as closely as possible
+
+* Natural experiments (aka quasi experiments) mimic the random assignment although the treatment assignment is not controlled by the analyst
+
+* Difference in Differences strategy allows us to estimate the causal effect of a intervention on outcome variables
+
+* Difference in Differences relies on the parallel trends assumption, and an analyst needs to provide evidence that shows the condition is satisfied to make their research design credible
+
+# Acknowledgements
+
+I have borrowed material and re-mixed material from the following:
+
+* Matteo Courthoud's ["Understanding CUPED"](https://medium.com/towards-data-science/understanding-cuped-a822523641af)
+
+* Matt Blackwell's [Gov 50](https://gov50-f23.github.io/) "Data Science for the Social Sciences" lecture on ["Observational Studies"](https://gov50-f23.github.io/slides/08_obs_studies_handout.pdf)
+
+\small
+Suggested Citation:
+
+```{r, engine='out', echo=TRUE, eval = FALSE}
+@misc{smwa2025_did,
+      title={"Social Media and Web Analytics: Difference in Differences"},
+      author={Lachlan Deer},
+      year={2025},
+      url = "https://tisem-digital-marketing.github.io/2025-smwa"
+}
+```
+
+This course adheres to the principles of the [\alertb{Open Science Community of Tilburg University}](https://www.tilburguniversity.edu/research/open-science-community). 
+This initiative advocates for transparency and accessibility in research and teaching to all levels of society and thus creating more accountability and impact.
+
+This work is licensed under a [\alertb{Creative Commons Attribution-ShareAlike 4.0 International License}](http://creativecommons.org/licenses/by-sa/4.0/).
